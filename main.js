@@ -16,7 +16,7 @@ const CONFIG = {
   plantingMode: "auto50",
   boosterIgnoreReservedAP: true,
   manual: { wheatSlots: [1,2,3,4,5], goldenSlots: [6,7,8,9,10] },
-  safetyMargin: 1,
+  safetyMargin: 2,
   perRequestDelayMs: 120,
   postHarvestPoll: { tries: 6, delayMs: 250 },
   apFloor: 0,

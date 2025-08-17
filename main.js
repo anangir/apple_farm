@@ -36,7 +36,7 @@ const CONFIG = {
     booster: 5000,
   },
   
-  showBufferInfo: true,
+  showBufferInfo: false,
   debug: false,         
   proxy: {
     enabled: false,
@@ -1598,22 +1598,22 @@ class StateChecker {
 
   /* ---------- priority order ---------- */
   determinePriority(a) {
-    if (a.needsBuyPlot) {
-      a.nextAction = "buyPlot"; a.priority = 1;
-    } else if (a.needsHarvest) {
+    if (a.needsBuySeeds && a.needsPlanting) {
+      a.nextAction = "buySeeds"; a.priority = 1;
+    } else if (a.needsPlanting) {
       a.nextAction = "plant"; a.priority = 1;
     } else if (a.needsClaim) {
       a.nextAction = "claim"; a.priority = 1;
-    } else if (a.needsBuySeeds && a.needsPlanting) {
-      a.nextAction = "buySeeds"; a.priority = 2;
+    } else if (a.needsBuyPlot) {
+      a.nextAction = "buyPlot"; a.priority = 2;
     } else if (a.needsBuyBoosters) {
-      a.nextAction = "buyBoosters"; a.priority = 2;
+      a.nextAction = "buyBoosters"; a.priority = 3;
     } else if (a.needsApplyBoosters) {
-      a.nextAction = "applyBoosters"; a.priority = 2;
-    } else if (a.needsPlanting) {
-      a.nextAction = "harvest"; a.priority = 3;
+      a.nextAction = "applyBoosters"; a.priority = 3;
+    } else if (a.needsHarvest) {
+      a.nextAction = "harvest"; a.priority = 4;
     } else {
-      a.nextAction = "wait"; a.priority = 4;
+      a.nextAction = "wait"; a.priority = 5;
     }
   }
 
@@ -1672,91 +1672,7 @@ async function smartDelayAutomatedWorker(accountIndex, cookie, display) {
       const analysis = stateChecker.analyzeState(state);
 
       let immediateAction = false;
-
-      //️ BUY PLOT (prioritas tertinggi)
-      if (analysis.needsBuyPlot) {
-        const aff = farmManager.canAffordPlot(state);
-        if (aff.canAfford) {
-          display.updateAccount(accountIndex, state, `Buying plot (${aff.amount} ${aff.currency})`);
-          try {
-            await apiClient.buyPlot();
-            state = await apiClient.getState();
-            display.updateAccount(accountIndex, state, `Plot purchased successfully`);
-            immediateAction = true;
-            consecutiveNoActions = 0;
-            continue;
-          } catch (e) {
-            display.updateAccount(accountIndex, state, `Plot purchase failed: ${String(e.message || e).split(':')[0]}`);
-          }
-        }
-      }
       
-      // PLANT
-      if (analysis.needsPlanting) {
-        const seeds = {
-          wheat: GameUtils.countItems(state.items, "wheat"),
-          "golden-apple": GameUtils.countItems(state.items, "golden-apple"),
-          "royal-apple": GameUtils.countItems(state.items, "royal-apple"),
-        };
-        const plan = farmManager.createFinalPlantingPlan(state, analysis.emptySlots, seeds);
-        if (plan.length > 0) {
-          const groups = plan.reduce((g, p) => { (g[p.key] ||= []).push(p.slot); return g; }, {});
-          for (const [seedType, slots] of Object.entries(groups)) {
-            if (!slots.length) continue;
-            display.updateAccount(accountIndex, state, `Planting ${seedType} in ${slots.length} slots`);
-            let success = 0;
-            for (const s of slots) {
-              try {
-                const current = await apiClient.getState();
-                const tgt = current.plots?.find(x => x.slotIndex === s);
-                if (tgt?.seed) continue;
-                await apiClient.plantSeed(s, seedType);
-                success++;
-                await GameUtils.sleep(150);
-              } catch {}
-            }
-            if (success > 0) {
-              state = await apiClient.getState();
-              display.updateAccount(accountIndex, state, `Planted ${success}x ${seedType} successfully`);
-              immediateAction = true;
-              consecutiveNoActions = 0;
-              break;
-            }
-          }
-          if (immediateAction) continue;
-        }
-      }
-
-      // DAILY CLAIM
-      if (analysis.needsClaim) {
-        display.updateAccount(accountIndex, state, `Claiming daily rewards now`);
-        try {
-          const before = new Date(state?.lastFarmhouseAt || 0).getTime() || 0;
-          await apiClient.claimFarmhouse();
-
-          const verifiedState = await GameUtils.refreshStateUntil(
-            apiClient,
-            s => (new Date(s?.lastFarmhouseAt || 0).getTime() || 0) > before,
-            { tries: 6, delayMs: 700 }
-          );
-
-          const after = new Date(verifiedState?.lastFarmhouseAt || 0).getTime() || 0;
-          if (after > before) {
-            state = verifiedState;
-            display.updateAccount(accountIndex, state, `Daily rewards claimed successfully`);
-          } else {
-            display.updateAccount(accountIndex, state, `Claim sent (not confirmed) — continuing`);
-            state = await apiClient.getState();
-          }
-
-          immediateAction = true;
-          consecutiveNoActions = 0;
-          continue;
-        } catch (e) {
-          display.updateAccount(accountIndex, state, `Claim failed: ${String(e.message || e).split(':')[0]}`);
-        }
-      }
-
       // BUY SEEDS (prioritas: royal > golden > wheat)
       if (analysis.needsBuySeeds) {
         const order = ["royal-apple", "golden-apple", "wheat"].filter(
@@ -1805,7 +1721,91 @@ async function smartDelayAutomatedWorker(accountIndex, cookie, display) {
           continue; // lanjut ke siklus berikutnya untuk tanam
         }
       }
+      
+      // PLANT
+      if (analysis.needsPlanting) {
+        const seeds = {
+          wheat: GameUtils.countItems(state.items, "wheat"),
+          "golden-apple": GameUtils.countItems(state.items, "golden-apple"),
+          "royal-apple": GameUtils.countItems(state.items, "royal-apple"),
+        };
+        const plan = farmManager.createFinalPlantingPlan(state, analysis.emptySlots, seeds);
+        if (plan.length > 0) {
+          const groups = plan.reduce((g, p) => { (g[p.key] ||= []).push(p.slot); return g; }, {});
+          for (const [seedType, slots] of Object.entries(groups)) {
+            if (!slots.length) continue;
+            display.updateAccount(accountIndex, state, `Planting ${seedType} in ${slots.length} slots`);
+            let success = 0;
+            for (const s of slots) {
+              try {
+                const current = await apiClient.getState();
+                const tgt = current.plots?.find(x => x.slotIndex === s);
+                if (tgt?.seed) continue;
+                await apiClient.plantSeed(s, seedType);
+                success++;
+                await GameUtils.sleep(150);
+              } catch {}
+            }
+            if (success > 0) {
+              state = await apiClient.getState();
+              display.updateAccount(accountIndex, state, `Planted ${success}x ${seedType} successfully`);
+              immediateAction = true;
+              consecutiveNoActions = 0;
+              break;
+            }
+          }
+          if (immediateAction) continue;
+        }
+      }
+      
+      // DAILY CLAIM
+      if (analysis.needsClaim) {
+        display.updateAccount(accountIndex, state, `Claiming daily rewards now`);
+        try {
+          const before = new Date(state?.lastFarmhouseAt || 0).getTime() || 0;
+          await apiClient.claimFarmhouse();
 
+          const verifiedState = await GameUtils.refreshStateUntil(
+            apiClient,
+            s => (new Date(s?.lastFarmhouseAt || 0).getTime() || 0) > before,
+            { tries: 6, delayMs: 700 }
+          );
+
+          const after = new Date(verifiedState?.lastFarmhouseAt || 0).getTime() || 0;
+          if (after > before) {
+            state = verifiedState;
+            display.updateAccount(accountIndex, state, `Daily rewards claimed successfully`);
+          } else {
+            display.updateAccount(accountIndex, state, `Claim sent (not confirmed) — continuing`);
+            state = await apiClient.getState();
+          }
+
+          immediateAction = true;
+          consecutiveNoActions = 0;
+          continue;
+        } catch (e) {
+          display.updateAccount(accountIndex, state, `Claim failed: ${String(e.message || e).split(':')[0]}`);
+        }
+      }
+
+      //️ BUY PLOT
+      if (analysis.needsBuyPlot) {
+        const aff = farmManager.canAffordPlot(state);
+        if (aff.canAfford) {
+          display.updateAccount(accountIndex, state, `Buying plot (${aff.amount} ${aff.currency})`);
+          try {
+            await apiClient.buyPlot();
+            state = await apiClient.getState();
+            display.updateAccount(accountIndex, state, `Plot purchased successfully`);
+            immediateAction = true;
+            consecutiveNoActions = 0;
+            continue;
+          } catch (e) {
+            display.updateAccount(accountIndex, state, `Plot purchase failed: ${String(e.message || e).split(':')[0]}`);
+          }
+        }
+      }
+      
       // BUY BOOSTERS (PARCIAL, hormati config boosterIgnoreReservedAP)
       if (analysis.needsBuyBoosters) {
         const costPer = CONFIG.boosterCostAP || 175;

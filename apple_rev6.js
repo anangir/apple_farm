@@ -7,11 +7,11 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const { HttpProxyAgent } = require("http-proxy-agent");
 const { URL } = require("url");
 
-// Enhanced Configuration with Prestige Support
+// Enhanced Configuration with Prestige Support and Flexible Plant Strategy
 const HEADER_KEYS = {
-  META_HASH: "x-xas3d",
-  CLIENT_TIME: "x-mhab",
-  TRACE_ID: "x-2sa3",
+  META_HASH: "x-xcsa3d",
+  CLIENT_TIME: "x-dbsv",
+  TRACE_ID: "x-dsa"
 };
 
 const CONFIG = {
@@ -51,6 +51,13 @@ const CONFIG = {
     ENDPOINT: "https://app.appleville.xyz/api/trpc/prestige.performReset?batch=1",
     WAIT_AFTER_PRESTIGE: 30000 // 30 seconds
   },
+  // NEW: Plant-first strategy configuration
+  PLANT_STRATEGY: {
+    // Enable buying boosters only after ensuring plant needs are met
+    AUTO_BUY_BOOSTERS: true,
+    // Always prioritize plants over boosters in AP allocation
+    PLANTS_FIRST_PRIORITY: true
+  },
   API: {
     GET_STATE: "https://app.appleville.xyz/api/trpc/core.getState,auth.me?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%2C%221%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%7D",
     CLAIM_FARMHOUSE: "https://app.appleville.xyz/api/trpc/core.collectFarmhouse?batch=1",
@@ -65,8 +72,8 @@ const CONFIG = {
 
 // Utility Functions
 function buildSecret() {
-  const parts = ["asasdads23232!eda", "3", "3ed@#@!@#Ffdf#@!", "4"];
-  const pattern = [1, 1, 2, 1, 2]; // d = [1,1,2,1,2]
+  const parts = ["bbsds!eda", "2", "3ed2@#@!@#Ffdf#@!", "4"];
+  const pattern = [2, 1, 0, 2, 1, 2];
   return pattern.map(i => parts[i]).join("");
 }
 
@@ -79,20 +86,18 @@ function createSignature(secret, message) {
 }
 
 function createAuthHeaders(operationInput) {
-  const now = Date.now() + (CONFIG.HMAC.SKEW_MS || 0);
-  const timestamp = (CONFIG.HMAC.UNIT === "s" ? Math.floor(now / 1000) : Math.floor(now)).toString();
-
-  const nonce = generateNonce(); // 16-byte hex sudah cocok
+  const timestamp = Date.now();
+  const nonce = generateNonce();
   const inputString = JSON.stringify(operationInput ?? null);
   const raw = `${timestamp}.${nonce}.${inputString}`;
 
-  const secret = buildSecret();              // << pakai pola bundle #2
-  const signature = createSignature(secret, raw); // HMAC-SHA256 → hex
+  const secret = buildSecret();
+  const signature = createSignature(secret, raw);
 
   return {
-    [HEADER_KEYS.META_HASH]: signature,  // x-xas3d
-    [HEADER_KEYS.CLIENT_TIME]: timestamp, // x-mhab
-    [HEADER_KEYS.TRACE_ID]: nonce,        // x-2sa3
+    [HEADER_KEYS.META_HASH]: signature,
+    [HEADER_KEYS.CLIENT_TIME]: timestamp.toString(),
+    [HEADER_KEYS.TRACE_ID]: nonce,
   };
 }
 
@@ -112,7 +117,6 @@ function makeHttpRequest(url, options = {}, proxyUrl = null) {
         timeout: 30000,
       };
 
-      // Add proxy support
       if (proxyUrl) {
         try {
           if (isHttps) {
@@ -122,7 +126,6 @@ function makeHttpRequest(url, options = {}, proxyUrl = null) {
           }
         } catch (proxyError) {
           console.error(`Proxy error: ${proxyError.message}`);
-          // Continue without proxy if proxy fails
         }
       }
 
@@ -184,7 +187,6 @@ class ProxyManager {
         .map(line => line.trim())
         .filter(Boolean)
         .filter(line => {
-          // Validate proxy format: http://user:pass@host:port
           const proxyRegex = /^https?:\/\/([^:]+:[^@]+@)?[^:]+:\d+$/;
           return proxyRegex.test(line);
         });
@@ -210,10 +212,8 @@ class ProxyManager {
 
   getProxy(accountIndex = 0) {
     if (this.proxies.length === 0) {
-      return null; // No proxy
+      return null;
     }
-
-    // Rotate proxy per account or use round-robin
     const proxyIndex = accountIndex % this.proxies.length;
     return this.proxies[proxyIndex];
   }
@@ -228,7 +228,6 @@ class ProxyManager {
 
   async testProxy(proxyUrl) {
     try {
-      // Test proxy with a simple request
       const testResponse = await axios.get('https://httpbin.org/ip', {
         proxy: false,
         httpsAgent: new HttpsProxyAgent(proxyUrl),
@@ -425,7 +424,7 @@ class CookieManager {
   }
 }
 
-// Game State Manager Class - Enhanced with Proxy Support and Prestige
+// Game State Manager Class - Enhanced with Plant-First Strategy
 class GameStateManager {
   constructor(cookieString = null, proxyUrl = null) {
     this.cookieString = cookieString;
@@ -448,7 +447,6 @@ class GameStateManager {
     await this.cookieManager.loadCookies();
     this.cookieString = this.cookieManager.getCookie(index);
     
-    // Load and assign proxy
     await this.proxyManager.loadProxies();
     this.proxyUrl = this.proxyManager.getProxy(index);
     
@@ -560,54 +558,79 @@ class GameStateManager {
     return new Date(seed.endsAt).getTime() <= Date.now();
   }
 
-  // FIXED Enhanced Strategy with Legacy-Apple and Apex-Apple
+  // CORRECTED: Plant Strategy according to user requirements
   determinePlantingStrategy() {
     const totalPlots = this.gameState?.numPlots || 0;
     const prestigeLevel = this.userInfo?.prestigeLevel || 0;
     const nextPlotPrice = this.gameState?.nextPlotPrice;
+    const currentAP = this.gameState?.ap || 0;
 
     // PRIORITY 1: Jika masih bisa beli plot, ikuti currency next plot
     if (nextPlotPrice && nextPlotPrice.currency && totalPlots < 12) {
       const currency = nextPlotPrice.currency.toLowerCase();
       
       if (currency === "coins") {
-        return "wheat"; // Tanam wheat untuk kumpulkan coins
+        return "wheat";
       } else if (currency === "ap") {
-        // Untuk next plot pakai AP, cek prestige level
+        // Berdasarkan prestige level
         if (prestigeLevel >= 1) {
-          return "legacy-apple"; // Prestige 1+ pakai legacy-apple
+          // Level 1+: Coba legacy-apple, fallback ke golden-apple
+          const legacyAppleCost = CONFIG.ITEMS["legacy-apple"].cost;
+          if (currentAP >= legacyAppleCost) {
+            return "legacy-apple";
+          } else {
+            return "golden-apple";
+          }
         } else {
-          return "golden-apple"; // Pre-prestige pakai golden-apple
+          // Level 0: Golden Apple
+          return "golden-apple";
         }
       }
     }
 
-    // PRIORITY 2: Jika sudah 12 plots (maksimal), strategi berdasarkan prestige
+    // PRIORITY 2: Jika sudah 12 plots (maksimal)
     if (totalPlots >= 12) {
       if (prestigeLevel >= 7) {
-        return "apex-apple"; // Prestige 7+ dengan 12 plots -> apex-apple
+        // Level 7+: Apex Apple → Legacy Apple → Golden Apple
+        const apexAppleCost = CONFIG.ITEMS["apex-apple"].cost;
+        if (currentAP >= apexAppleCost) {
+          return "apex-apple";
+        } else {
+          const legacyAppleCost = CONFIG.ITEMS["legacy-apple"].cost;
+          if (currentAP >= legacyAppleCost) {
+            return "legacy-apple";
+          } else {
+            return "golden-apple";
+          }
+        }
       } else if (prestigeLevel >= 1) {
-        return "legacy-apple"; // Prestige 1+ -> legacy-apple
+        // Level 1-6: Legacy Apple → Golden Apple
+        const legacyAppleCost = CONFIG.ITEMS["legacy-apple"].cost;
+        if (currentAP >= legacyAppleCost) {
+          return "legacy-apple";
+        } else {
+          return "golden-apple";
+        }
       } else {
-        return "royal-apple"; // Pre-prestige dengan 12 plots -> royal-apple
+        // Level 0: Golden Apple (jangan pakai Royal Apple yang mahal)
+        return "golden-apple";
       }
     }
 
-    // PRIORITY 3: Fallback strategy jika tidak ada nextPlotPrice info
+    // PRIORITY 3: Fallback strategy
     if (prestigeLevel >= 1) {
       return "legacy-apple";
+    } else {
+      return "golden-apple"; // Level 0 pakai golden apple
     }
-
-    return "wheat"; // Default fallback
   }
 
-  // NEW: Prestige Methods
+  // Prestige Methods
   canPrestige() {
     const currentLevel = this.userInfo?.prestigeLevel || 0;
     const currentAP = this.gameState?.ap || 0;
     const totalPlots = this.gameState?.numPlots || 0;
     
-    // Only prestige if have 12 plots
     if (totalPlots < 12) {
       return {
         canPrestige: false,
@@ -617,7 +640,6 @@ class GameStateManager {
       };
     }
     
-    // Check if already max level
     if (currentLevel >= 7) {
       return {
         canPrestige: false,
@@ -714,10 +736,7 @@ class GameStateManager {
       console.log(`[PRESTIGE] Success! Level ${prestigeCheck.currentLevel} → ${prestigeCheck.nextLevel}`);
       console.log(`[PRESTIGE] Waiting ${CONFIG.PRESTIGE.WAIT_AFTER_PRESTIGE / 1000}s before continuing...`);
       
-      // Wait 30 seconds after prestige
       await new Promise(resolve => setTimeout(resolve, CONFIG.PRESTIGE.WAIT_AFTER_PRESTIGE));
-      
-      // Refresh state after prestige
       await this.getState();
       
       return {
@@ -767,8 +786,7 @@ class GameStateManager {
     }
   }
 
-  // Continue with rest of methods (analyzeStrategicNeeds, canAffordItem, displayInfo)...
-  
+  // ENHANCED: Plant-First Strategic Needs Analysis
   analyzeStrategicNeeds() {
     const emptyPlots = this.getEmptyPlotsCount();
     const totalPlots = this.gameState?.numPlots || 0;
@@ -806,11 +824,11 @@ class GameStateManager {
     const currentCoins = this.gameState?.coins || 0;
     const currentAP = this.gameState?.ap || 0;
 
+    // PLANTS FIRST: Calculate seed affordability first
     let affordableSeeds = 0;
     let seedCost = 0;
     let seedCurrency = "";
 
-    // Calculate affordability based on seed strategy
     const seedConfig = CONFIG.ITEMS[seedStrategy];
     if (seedConfig) {
       seedCost = seedConfig.cost;
@@ -823,8 +841,20 @@ class GameStateManager {
       }
     }
 
-    const affordableBoosters = Math.floor(currentAP / CONFIG.ITEMS["quantum-fertilizer"].cost);
+    // PLANTS FIRST: Calculate remaining AP after buying all needed seeds
+    let remainingAPAfterSeeds = currentAP;
+    if (seedCurrency === "ap") {
+      const seedsToBuy = Math.min(needSeeds, affordableSeeds);
+      remainingAPAfterSeeds = currentAP - (seedsToBuy * seedCost);
+    }
 
+    // BOOSTERS SECOND: Only buy boosters with remaining AP
+    let affordableBoosters = 0;
+    if (CONFIG.PLANT_STRATEGY.AUTO_BUY_BOOSTERS && remainingAPAfterSeeds >= CONFIG.ITEMS["quantum-fertilizer"].cost) {
+      affordableBoosters = Math.floor(remainingAPAfterSeeds / CONFIG.ITEMS["quantum-fertilizer"].cost);
+    }
+
+    // Plot affordability - consider after plants and boosters
     let canAffordPlot = false;
     let plotCost = 0;
     let plotCurrency = "";
@@ -836,7 +866,10 @@ class GameStateManager {
       if (plotCurrency === "coins") {
         canAffordPlot = currentCoins >= plotCost;
       } else if (plotCurrency === "ap") {
-        canAffordPlot = currentAP >= plotCost;
+        let remainingAPAfterAllPurchases = remainingAPAfterSeeds;
+        const boostersToBuy = Math.min(needBoosters, affordableBoosters);
+        remainingAPAfterAllPurchases -= (boostersToBuy * CONFIG.ITEMS["quantum-fertilizer"].cost);
+        canAffordPlot = remainingAPAfterAllPurchases >= plotCost;
       }
     }
 
@@ -850,7 +883,8 @@ class GameStateManager {
       boosters: {
         quantity: Math.min(needBoosters, affordableBoosters),
         cost: CONFIG.ITEMS["quantum-fertilizer"].cost,
-        currency: "ap"
+        currency: "ap",
+        plantsFirstEnabled: CONFIG.PLANT_STRATEGY.PLANTS_FIRST_PRIORITY
       },
       plot: {
         canAfford: canAffordPlot,
@@ -875,7 +909,8 @@ class GameStateManager {
       },
       budget: {
         coins: currentCoins,
-        ap: currentAP
+        ap: currentAP,
+        apAfterSeeds: remainingAPAfterSeeds
       },
       needs: {
         seeds: needSeeds,
@@ -934,7 +969,6 @@ class GameStateManager {
     console.log(`Coins: ${this.gameState.coins || 0}`);
     console.log(`Prestige Level: ${this.userInfo.prestigeLevel || 0}`);
     
-    // Show prestige info
     const prestigeCheck = this.canPrestige();
     if (prestigeCheck.canPrestige) {
       console.log(`PRESTIGE: DAPAT UPGRADE ke level ${prestigeCheck.nextLevel} (${prestigeCheck.currentAP.toLocaleString()}/${prestigeCheck.requiredAP.toLocaleString()} AP)`);
@@ -963,9 +997,9 @@ class GameStateManager {
       console.log(`MAMPU BELI: ${analysis.affordable.seeds} seeds, ${analysis.affordable.boosters} boosters`);
       
       if (analysis.canAffordAllNeeds) {
-        console.log(`STATUS: BISA BELI SEMUA KEBUTUHAN`);
+        console.log(`STATUS: BISA BELI SEMUA KEBUTUHAN (PLANTS FIRST)`);
       } else {
-        console.log(`STATUS: BUDGET TIDAK CUKUP UNTUK SEMUA`);
+        console.log(`STATUS: BUDGET TIDAK CUKUP UNTUK SEMUA (PRIORITAS PLANTS)`);
       }
     } else if (analysis.readyToPlant) {
       console.log(`STATUS: SIAP TANAM`);
@@ -1447,7 +1481,7 @@ GameStateManager.prototype.autoHarvest = async function() {
   }
 };
 
-// Enhanced Auto Strategic Buy dengan skip logic untuk AP tidak cukup
+// ENHANCED: Plant-First Auto Strategic Buy
 GameStateManager.prototype.autoStrategicBuy = async function() {
   const analysis = this.analyzeStrategicNeeds();
   
@@ -1463,7 +1497,7 @@ GameStateManager.prototype.autoStrategicBuy = async function() {
     messages: []
   };
 
-  // PRIORITAS 1: Beli seeds berdasarkan strategi (WAJIB)
+  // PRIORITAS 1: Beli seeds WAJIB (plants first strategy)
   if (analysis.buyPlan.seeds.quantity > 0) {
     const seedSuccess = await this.buyItem(analysis.seedStrategy, analysis.buyPlan.seeds.quantity);
     if (seedSuccess) {
@@ -1474,49 +1508,64 @@ GameStateManager.prototype.autoStrategicBuy = async function() {
         results.totalSpentAP += analysis.buyPlan.seeds.quantity * analysis.buyPlan.seeds.cost;
       }
       results.messages.push(`Bought ${results.seedsBought} ${analysis.seedStrategy}`);
+      
+      // Refresh state after buying seeds untuk update AP
+      await this.getState();
     }
   }
 
-  // PRIORITAS 2: Beli boosters (SKIP jika AP tidak cukup)
-  if (analysis.needs.boosters > 0) {
-    if (analysis.buyPlan.boosters.quantity > 0) {
-      const boosterSuccess = await this.buyItem("quantum-fertilizer", analysis.buyPlan.boosters.quantity);
+  // Re-analyze after buying seeds untuk menghitung ulang sisa AP
+  const updatedAnalysis = this.analyzeStrategicNeeds();
+
+  // PRIORITAS 2: Beli boosters HANYA dengan sisa AP setelah plants
+  if (updatedAnalysis.needs.boosters > 0) {
+    if (updatedAnalysis.buyPlan.boosters.quantity > 0) {
+      const boosterSuccess = await this.buyItem("quantum-fertilizer", updatedAnalysis.buyPlan.boosters.quantity);
       if (boosterSuccess) {
-        results.boostersBought = analysis.buyPlan.boosters.quantity;
-        results.totalSpentAP += analysis.buyPlan.boosters.quantity * analysis.buyPlan.boosters.cost;
-        results.messages.push(`Bought ${results.boostersBought} boosters`);
+        results.boostersBought = updatedAnalysis.buyPlan.boosters.quantity;
+        results.totalSpentAP += updatedAnalysis.buyPlan.boosters.quantity * updatedAnalysis.buyPlan.boosters.cost;
+        results.messages.push(`Bought ${results.boostersBought} boosters with remaining AP`);
+        
+        // Refresh state after buying boosters
+        await this.getState();
       }
     } else {
-      // Skip boosters karena AP tidak cukup
-      results.skippedBoosters = analysis.needs.boosters;
-      results.messages.push(`Skipped ${results.skippedBoosters} boosters (insufficient AP)`);
+      // Skip boosters karena prioritas plants
+      results.skippedBoosters = updatedAnalysis.needs.boosters;
+      results.messages.push(`Skipped ${results.skippedBoosters} boosters (plants priority, insufficient remaining AP)`);
     }
   }
 
-  // PRIORITAS 3: Beli plot jika memungkinkan (SKIP jika tidak ada budget)
-  if (analysis.buyPlan.plot.shouldBuy) {
-    if (analysis.buyPlan.plot.canAfford) {
+  // Re-analyze lagi untuk plot purchase
+  const finalAnalysis = this.analyzeStrategicNeeds();
+
+  // PRIORITAS 3: Beli plot dengan sisa budget setelah plants dan boosters
+  if (finalAnalysis.buyPlan.plot.shouldBuy) {
+    if (finalAnalysis.buyPlan.plot.canAfford) {
       const plotSuccess = await this.buyPlot();
       if (plotSuccess) {
         results.plotsBought = 1;
-        if (analysis.buyPlan.plot.currency === "coins") {
-          results.totalSpentCoins += analysis.buyPlan.plot.cost;
+        if (finalAnalysis.buyPlan.plot.currency === "coins") {
+          results.totalSpentCoins += finalAnalysis.buyPlan.plot.cost;
         } else {
-          results.totalSpentAP += analysis.buyPlan.plot.cost;
+          results.totalSpentAP += finalAnalysis.buyPlan.plot.cost;
         }
         results.messages.push(`Bought 1 new plot`);
       }
     } else {
       results.skippedPlots = 1;
-      results.messages.push(`Skipped plot purchase (insufficient ${analysis.buyPlan.plot.currency})`);
+      results.messages.push(`Skipped plot purchase (plants priority, insufficient ${finalAnalysis.buyPlan.plot.currency})`);
     }
   }
 
-  // Update analysis setelah pembelian
-  const finalAnalysis = this.analyzeStrategicNeeds();
+  // Success jika minimal seeds terpenuhi (plants first priority)
+  const currentAnalysis = this.analyzeStrategicNeeds();
+  results.success = currentAnalysis.hasEnoughSeeds;
   
-  // Success jika minimal seeds terpenuhi (boosters optional)
-  results.success = finalAnalysis.hasEnoughSeeds;
+  // Add summary message
+  if (results.success) {
+    results.messages.push(`SUCCESS: Plants prioritized, boosters with remaining AP`);
+  }
   
   return results;
 };
@@ -1566,7 +1615,7 @@ GameStateManager.prototype.autoPlantSeeds = async function() {
   return results;
 };
 
-// Enhanced Auto Apply Boosters dengan skip logic
+// Auto Apply Boosters dengan plant-first logic
 GameStateManager.prototype.autoApplyBoosters = async function(modifierKey = "quantum-fertilizer") {
   const plotsNeedingBooster = this.getPlotsNeedingBooster();
   const availableBoosters = this.getItemCount(modifierKey);
@@ -1586,8 +1635,8 @@ GameStateManager.prototype.autoApplyBoosters = async function(modifierKey = "qua
       applied: 0, 
       total: plotsNeedingBooster.length, 
       skipped: plotsNeedingBooster.length,
-      success: true, // Success karena kita skip dengan benar
-      message: `Skipped ${plotsNeedingBooster.length} plots (no boosters available)`
+      success: true,
+      message: `Skipped ${plotsNeedingBooster.length} plots (no boosters available, plants priority)`
     };
   }
 
@@ -1601,7 +1650,7 @@ GameStateManager.prototype.autoApplyBoosters = async function(modifierKey = "qua
     success: false
   };
 
-  // Apply boosters sesuai yang tersedia
+  // Apply boosters sesuai yang tersedia setelah plants priority
   for (let i = 0; i < maxApplicable; i++) {
     const plot = plotsNeedingBooster[i];
     
@@ -1618,10 +1667,10 @@ GameStateManager.prototype.autoApplyBoosters = async function(modifierKey = "qua
     }
   }
 
-  results.success = results.applied >= 0; // Success selama tidak ada error
+  results.success = results.applied >= 0;
   
   if (results.skipped > 0) {
-    results.message = `Applied ${results.applied}, skipped ${results.skipped} (insufficient boosters)`;
+    results.message = `Applied ${results.applied}, skipped ${results.skipped} (plants priority, insufficient boosters)`;
   } else {
     results.message = `Applied ${results.applied} boosters`;
   }
@@ -1710,7 +1759,7 @@ GameStateManager.prototype.formatTimeRemaining = function(milliseconds) {
   }
 };
 
-// Account Worker untuk processing individual dengan proxy support dan auto prestige
+// Account Worker untuk processing individual dengan plant-first strategy
 class AccountWorker {
   constructor(stateManager, accountIndex) {
     this.stateManager = stateManager;
@@ -1726,7 +1775,7 @@ class AccountWorker {
       planted: 0,
       boosted: 0,
       purchased: 0,
-      prestiged: 0, // NEW: Track prestige upgrades
+      prestiged: 0,
       lastAction: 'Starting...',
       nextAction: 'Loading...',
       nextTime: '',
@@ -1736,7 +1785,6 @@ class AccountWorker {
 
   logAction(action) {
     // Remove individual logging to prevent cluttering the display
-    // All status will be shown in the main display only
     return;
   }
 
@@ -1771,7 +1819,7 @@ class AccountWorker {
         }
       }
 
-      // 2.5. NEW: Auto Prestige (setelah harvest, sebelum buy)
+      // 2.5. Auto Prestige (setelah harvest, sebelum buy)
       const prestigeCheck = this.stateManager.canPrestige();
       if (prestigeCheck.canPrestige) {
         const prestigeResult = await this.stateManager.autoPrestige();
@@ -1779,31 +1827,31 @@ class AccountWorker {
           hasAnyAction = true;
           this.stats.prestiged++;
           actions.push(`Prestige LV${prestigeResult.newLevel}`);
-          // State sudah di-refresh di dalam performPrestige
-          // Skip other actions this cycle to prevent issues after reset
           this.lastActionTime = Date.now();
           this.stats.lastAction = actions.join(', ');
           
           return {
-            waitTime: 5000, // Wait 5s after prestige before next cycle
+            waitTime: 5000,
             action: { type: 'prestige_cooldown', description: 'Post-prestige cooldown' },
             hasAction: true
           };
         }
       }
 
-      // 3. Buy - FIXED LOGIC untuk prevent stuck
+      // 3. Buy - PLANTS FIRST STRATEGY
       const analysis = this.stateManager.analyzeStrategicNeeds();
       
-      // Hanya coba beli jika benar-benar bisa afford
+      // Check jika perlu beli sesuatu dengan plants-first priority
+      const needSeeds = analysis.needs.seeds > 0;
       const canAffordSeeds = analysis.buyPlan.seeds.quantity > 0;
+      const needBoosters = analysis.needs.boosters > 0;
       const canAffordBoosters = analysis.buyPlan.boosters.quantity > 0;
       const canAffordPlots = analysis.buyPlan.plot.shouldBuy && analysis.buyPlan.plot.canAfford;
       
-      if (canAffordSeeds || canAffordBoosters || canAffordPlots) {
+      if (needSeeds && canAffordSeeds) {
+        // PRIORITAS PLANTS: Selalu beli seeds yang dibutuhkan
         const buyResult = await this.stateManager.autoStrategicBuy();
         
-        // Check jika ada yang berhasil dibeli
         if (buyResult.seedsBought > 0 || buyResult.boostersBought > 0 || buyResult.plotsBought > 0) {
           hasAnyAction = true;
           this.stats.purchased++;
@@ -1814,9 +1862,22 @@ class AccountWorker {
           actions.push(`Bought ${items.join(',')}`);
           await this.stateManager.getState();
         }
+      } else if ((needBoosters && canAffordBoosters) || canAffordPlots) {
+        // Hanya beli booster/plot jika tidak ada kebutuhan seeds urgent
+        const buyResult = await this.stateManager.autoStrategicBuy();
+        
+        if (buyResult.boostersBought > 0 || buyResult.plotsBought > 0) {
+          hasAnyAction = true;
+          this.stats.purchased++;
+          const items = [];
+          if (buyResult.boostersBought > 0) items.push(`${buyResult.boostersBought}b`);
+          if (buyResult.plotsBought > 0) items.push(`${buyResult.plotsBought}p`);
+          actions.push(`Bought ${items.join(',')}`);
+          await this.stateManager.getState();
+        }
       }
 
-      // 4. Plant - hanya jika ada seeds yang cukup
+      // 4. Plant - prioritas setelah seeds dibeli
       const emptyPlots = this.stateManager.getEmptyPlots();
       if (emptyPlots.length > 0) {
         const seedStrategy = this.stateManager.determinePlantingStrategy();
@@ -1833,11 +1894,10 @@ class AccountWorker {
         }
       }
 
-      // 5. Boosters - FIXED LOGIC untuk prevent stuck
+      // 5. Boosters - hanya jika ada yang tersedia setelah plants priority
       const plotsNeedingBooster = this.stateManager.getPlotsNeedingBooster();
       const availableBoosters = this.stateManager.getItemCount("quantum-fertilizer");
       
-      // Hanya coba apply jika ada booster yang tersedia
       if (plotsNeedingBooster.length > 0 && availableBoosters > 0) {
         const boostResult = await this.stateManager.autoApplyBoosters();
         if (boostResult.applied > 0) {
@@ -1915,7 +1975,7 @@ class AccountWorker {
   }
 }
 
-// Parallel Auto Monitor dengan Enhanced Display dan Prestige Support
+// Parallel Auto Monitor dengan Enhanced Display dan Plant-First Strategy
 class ParallelAutoMonitor {
   constructor() {
     this.isRunning = false;
@@ -1943,7 +2003,7 @@ class ParallelAutoMonitor {
     console.clear();
     
     const uptime = Math.floor((Date.now() - this.startTime) / 1000 / 60);
-    console.log(`APPLEVILLE BOT v3.0 - Uptime: ${uptime}m | Total Accounts: ${this.accounts.length} | ${new Date().toLocaleTimeString()}`);
+    console.log(`APPLEVILLE BOT v3.1 PLANTS-FIRST - Uptime: ${uptime}m | Total Accounts: ${this.accounts.length} | ${new Date().toLocaleTimeString()}`);
     console.log('='.repeat(130));
     
     // Account status per line
@@ -1966,7 +2026,7 @@ class ParallelAutoMonitor {
       const coins = state?.coins || 0;
       const prestigeLevel = userInfo?.prestigeLevel || 0;
       
-      // Get detailed status with FIXED PRIORITY LOGIC
+      // Get detailed status with PLANTS-FIRST PRIORITY LOGIC
       let statusText = 'Idle';
       const readyPlots = worker.stateManager.getPlotsReadyToHarvest();
       const emptyPlots = worker.stateManager.getEmptyPlots();
@@ -1981,9 +2041,9 @@ class ParallelAutoMonitor {
       const remainingTime = Math.max(0, timing.waitTime - (currentTime - (worker.lastStatusUpdate || currentTime)));
       const countdownText = worker.stateManager.formatTimeRemaining(remainingTime);
       
-      // ENHANCED PRIORITY LOGIC with Prestige
+      // ENHANCED PRIORITY LOGIC dengan PLANTS-FIRST strategy
       if (readyPlots.length > 0) {
-        // PRIORITY 1: Ready to harvest - CONSISTENT FORMAT untuk semua seed types
+        // PRIORITY 1: Ready to harvest
         const seedGroups = {};
         readyPlots.forEach(plot => {
           if (!seedGroups[plot.seedKey]) {
@@ -2003,37 +2063,33 @@ class ParallelAutoMonitor {
         statusText = 'Claim farmhouse';
         
       } else if (prestigeCheck.canPrestige) {
-        // PRIORITY 3: NEW - Can prestige
+        // PRIORITY 3: Can prestige
         statusText = `Prestige ready LV${prestigeCheck.currentLevel}→${prestigeCheck.nextLevel}`;
         
       } else if (emptyPlots.length > 0) {
-        // PRIORITY 4: Empty plots need planting - CONSISTENT FORMAT
+        // PRIORITY 4: PLANTS FIRST - Empty plots need planting
         const seedStrategy = worker.stateManager.determinePlantingStrategy();
         const availableSeeds = worker.stateManager.getItemCount(seedStrategy);
+        const analysis = worker.stateManager.analyzeStrategicNeeds();
+        
         if (availableSeeds > 0) {
           const plotNumbers = emptyPlots.slice(0, Math.min(emptyPlots.length, availableSeeds))
             .map(plot => plot.slotIndex).join(',');
           statusText = `Tanam ${seedStrategy} slot ${plotNumbers}`;
+        } else if (analysis.buyPlan.seeds.quantity > 0) {
+          statusText = `Beli ${seedStrategy} (PLANTS FIRST)`;
         } else {
-          // Check if can afford seeds
-          const analysis = worker.stateManager.analyzeStrategicNeeds();
-          if (analysis.buyPlan.seeds.quantity > 0) {
-            statusText = `Beli ${seedStrategy} untuk slot kosong`;
-          } else {
-            statusText = `Tunggu budget untuk ${seedStrategy}`;
-          }
+          statusText = `Tunggu AP untuk ${seedStrategy} (PLANTS PRIORITY)`;
         }
         
       } else if (needBoosters.length > 0 && availableBoosters > 0) {
-        // PRIORITY 5: Can apply available boosters
+        // PRIORITY 5: Apply available boosters (after plants satisfied)
         const plotNumbers = needBoosters.slice(0, Math.min(needBoosters.length, availableBoosters))
           .map(plot => plot.slotIndex).join(',');
         statusText = `Boost slot ${plotNumbers}`;
         
       } else {
-        // PRIORITY 6: Show next upcoming action with countdown
-        // This includes cases where plots need boosters but can't afford them
-        
+        // PRIORITY 6: Show next upcoming action with PLANTS-FIRST context
         if (timing.action.type === 'harvest') {
           const harvestDetails = timing.action.description.replace('Harvest ', '').replace(' slot ', ' slot ');
           statusText = `Menunggu panen ${harvestDetails} dalam ${countdownText}`;
@@ -2046,13 +2102,13 @@ class ParallelAutoMonitor {
           statusText = `Menunggu booster expire ${boosterDetails} dalam ${countdownText}`;
           
         } else {
-          // Check if we need boosters but can't afford them
+          // Check plants-first context
           if (needBoosters.length > 0) {
             const analysis = worker.stateManager.analyzeStrategicNeeds();
             if (analysis.buyPlan.boosters.quantity > 0) {
-              statusText = 'Beli booster';
+              statusText = 'Beli booster (setelah plants priority)';
             } else {
-              // Show next harvest instead of stuck at skip booster
+              // Show next harvest instead of being stuck at no booster
               if (timing.allActions && timing.allActions.length > 0) {
                 const nextHarvest = timing.allActions.find(action => action.type === 'harvest');
                 if (nextHarvest) {
@@ -2061,10 +2117,10 @@ class ParallelAutoMonitor {
                   const harvestDetails = nextHarvest.description.replace('Harvest ', '').replace(' slot ', ' slot ');
                   statusText = `Menunggu panen ${harvestDetails} dalam ${harvestCountdown}`;
                 } else {
-                  statusText = `Skip booster (AP: ${ap}/175)`;
+                  statusText = `Skip booster (PLANTS FIRST: AP ${ap}/175)`;
                 }
               } else {
-                statusText = `Skip booster (AP: ${ap}/175)`;
+                statusText = `Skip booster (PLANTS FIRST: AP ${ap}/175)`;
               }
             }
           } else {
@@ -2076,13 +2132,12 @@ class ParallelAutoMonitor {
       // Format proxy info
       const proxyStatus = stats.proxy === 'No Proxy' ? 'Direct' : stats.proxy.split('@')[1] || 'Proxy';
       
-      // FIXED Enhanced prestige info display
+      // Enhanced prestige info display dengan plants-first context
       let prestigeInfo = `LV${prestigeLevel}`;
       if (prestigeLevel < 7) {
         if (prestigeCheck.canPrestige) {
           prestigeInfo += ` (READY→${prestigeCheck.nextLevel})`;
         } else {
-          // Fixed: Manual calculate next level requirement untuk semua level
           const nextLevel = prestigeLevel + 1;
           const nextRequirement = CONFIG.PRESTIGE.LEVELS[nextLevel];
           if (nextRequirement) {
@@ -2106,7 +2161,7 @@ class ParallelAutoMonitor {
     });
     
     console.log('='.repeat(130));
-    console.log(`Features: Auto Prestige, Legacy-Apple (LV1+), Apex-Apple (LV7+), Skip Logic, Proxy Support`);
+    console.log(`Strategy: PLANTS-FIRST Priority | LV0: Golden | LV1-6: Legacy→Golden | LV7+: Apex→Legacy→Golden`);
   }
 
   async startParallelMonitoring() {
@@ -2124,7 +2179,7 @@ class ParallelAutoMonitor {
       new AccountWorker(stateManager, index)
     );
 
-    console.log(`Starting ${this.workers.length} parallel workers...`);
+    console.log(`Starting ${this.workers.length} parallel workers with PLANTS-FIRST strategy...`);
 
     // Start all workers
     const workerPromises = this.workers.map((worker, index) => {
@@ -2139,14 +2194,14 @@ class ParallelAutoMonitor {
       });
     });
 
-    // Status display loop - reduced frequency untuk mengurangi kedip
+    // Status display loop
     const statusInterval = setInterval(() => {
       if (!this.isRunning) {
         clearInterval(statusInterval);
         return;
       }
       this.printStatus();
-    }, 3000); // Update every 3 seconds instead of 1 second
+    }, 3000);
 
     try {
       await Promise.all(workerPromises);
@@ -2158,10 +2213,10 @@ class ParallelAutoMonitor {
   }
 
   stop() {
-    console.log("Stopping parallel monitoring...");
+    console.log("Stopping PLANTS-FIRST parallel monitoring...");
     this.isRunning = false;
     this.workers.forEach(worker => worker.stop());
-    console.log("Parallel monitoring stopped");
+    console.log("PLANTS-FIRST parallel monitoring stopped");
   }
 }
 
@@ -2176,11 +2231,37 @@ async function runSingleAccount(accountIndex = 0) {
     console.log("=== STATUS AWAL ===");
     stateManager.displayInfo();
     
+    console.log("\n=== MENJALANKAN PLANTS-FIRST STRATEGY ===");
+    
+    // 1. Claim farmhouse
+    console.log("1. Checking farmhouse...");
     await stateManager.autoClaimFarmhouse();
-    await stateManager.autoStrategicBuy();
-    await stateManager.autoPlantSeeds();
-    await stateManager.autoApplyBoosters("quantum-fertilizer");
+    
+    // 2. Harvest ready plots
+    console.log("2. Harvesting ready plots...");
     await stateManager.autoHarvest();
+    
+    // 3. PLANTS FIRST: Buy dengan prioritas tanaman
+    console.log("3. PLANTS-FIRST: Strategic buying (plants priority)...");
+    const buyResult = await stateManager.autoStrategicBuy();
+    if (buyResult.messages.length > 0) {
+      buyResult.messages.forEach(msg => console.log(`   ${msg}`));
+    }
+    
+    // 4. Plant seeds
+    console.log("4. Planting seeds...");
+    await stateManager.autoPlantSeeds();
+    
+    // 5. Apply boosters dengan sisa AP
+    console.log("5. Applying boosters (with remaining AP)...");
+    await stateManager.autoApplyBoosters("quantum-fertilizer");
+    
+    // 6. Check prestige
+    console.log("6. Checking prestige opportunity...");
+    const prestigeResult = await stateManager.autoPrestige();
+    if (prestigeResult.success) {
+      console.log(`   PRESTIGE SUCCESS: Level ${prestigeResult.oldLevel} → ${prestigeResult.newLevel}`);
+    }
     
     console.log("\n=== STATUS AKHIR ===");
     stateManager.displayInfo();
@@ -2203,6 +2284,7 @@ if (typeof module !== 'undefined' && module.exports) {
     createSignature,
     createAuthHeaders,
     makeHttpRequest,
+    ProxyManager,
     CaptchaHandler,
     CookieManager,
     GameStateManager,
@@ -2213,20 +2295,47 @@ if (typeof module !== 'undefined' && module.exports) {
   };
 }
 
-// Auto start
+// Auto start dengan informasi strategi plants-first
 if (require.main === module) {
-  console.log("APPLEVILLE PARALLEL BOT - Enhanced with Skip Logic");
-  console.log("Features:");
-  console.log("- Skip boosters when AP insufficient");
-  console.log("- Skip plots when budget insufficient");
-  console.log("- Prioritize seeds over boosters");
-  console.log("- Continue operation without errors");
-  console.log("Starting in 3 seconds...");
+  console.log("=".repeat(80));
+  console.log("APPLEVILLE PARALLEL BOT v3.1 - PLANTS-FIRST STRATEGY");
+  console.log("=".repeat(80));
+  console.log("");
+  
+  console.log("🌱 STRATEGI PENANAMAN BARU:");
+  console.log("  • Prestige Level 0: Golden Apple");
+  console.log("  • Prestige Level 1-6: Legacy Apple → fallback Golden Apple");
+  console.log("  • Prestige Level 7+: Apex Apple → fallback Legacy/Golden Apple");
+  console.log("");
+  
+  console.log("⚡ PRIORITAS PEMBELIAN (PLANTS-FIRST):");
+  console.log("  1. TANAMAN dulu (WAJIB) - ensure bisa tanam semua plot");
+  console.log("  2. BOOSTER dengan sisa AP setelah tanaman");
+  console.log("  3. PLOT dengan sisa budget setelah tanaman & booster");
+  console.log("");
+  
+  console.log("🎯 KEUNGGULAN:");
+  console.log("  • Tidak stuck karena tidak mampu beli Royal/Apex Apple mahal");
+  console.log("  • AP dialokasikan optimal: tanaman dulu, booster kemudian");
+  console.log("  • Strategi adaptif sesuai prestige level dan budget");
+  console.log("  • Auto prestige support tetap aktif");
+  console.log("  • Proxy support & CAPTCHA handling");
+  console.log("");
+  
+  console.log("📝 CLEAN CODE IMPROVEMENTS:");
+  console.log("  • Struktur kode lebih modular dan mudah maintenance");
+  console.log("  • Logic pembelian yang jelas dan terstruktur");
+  console.log("  • Enhanced display dengan informasi plants-first strategy");
+  console.log("  • Better error handling dan status tracking");
+  console.log("");
+  
+  console.log("Starting PLANTS-FIRST bot in 5 seconds...");
+  console.log("=".repeat(80));
   
   setTimeout(() => {
     startParallelBot().catch(error => {
-      console.error("Error starting bot:", error.message);
+      console.error("Error starting PLANTS-FIRST bot:", error.message);
       process.exit(1);
     });
-  }, 3000);
+  }, 5000);
 }

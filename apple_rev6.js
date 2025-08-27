@@ -563,9 +563,28 @@ class GameStateManager {
     const totalPlots = this.gameState?.numPlots || 0;
     const prestigeLevel = this.userInfo?.prestigeLevel || 0;
     const nextPlotPrice = this.gameState?.nextPlotPrice;
-    const currentAP = this.gameState?.ap || 0;
+    const currentAP = this.gameState?.ap || 0
+    
+      // CEK INVENTORY TERSEDIA DULU
+    const goldenAppleCount = this.getItemCount("golden-apple");
+    const legacyAppleCount = this.getItemCount("legacy-apple");
+    const apexAppleCount = this.getItemCount("apex-apple");
+    const wheatCount = this.getItemCount("wheat");
+      // PRIORITAS 1: Gunakan yang ada di inventory terlebih dahulu
+    if (prestigeLevel >= 7 && apexAppleCount > 0) {
+      return "apex-apple";
+    }
+    if (prestigeLevel >= 1 && legacyAppleCount > 0) {
+      return "legacy-apple";
+    }
+    if (goldenAppleCount > 0) {
+      return "golden-apple";
+    }
+    if (wheatCount > 0) {
+      return "wheat";
+    }
 
-    // PRIORITY 1: Jika masih bisa beli plot, ikuti currency next plot
+    // PRIORITY 2: Jika masih bisa beli plot, ikuti currency next plot
     if (nextPlotPrice && nextPlotPrice.currency && totalPlots < 12) {
       const currency = nextPlotPrice.currency.toLowerCase();
       
@@ -588,7 +607,7 @@ class GameStateManager {
       }
     }
 
-    // PRIORITY 2: Jika sudah 12 plots (maksimal)
+    // PRIORITY 3: Jika sudah 12 plots (maksimal)
     if (totalPlots >= 12) {
       if (prestigeLevel >= 7) {
         // Level 7+: Apex Apple → Legacy Apple → Golden Apple
@@ -617,12 +636,37 @@ class GameStateManager {
       }
     }
 
-    // PRIORITY 3: Fallback strategy
+    // PRIORITY 4: Fallback strategy
     if (prestigeLevel >= 1) {
       return "legacy-apple";
     } else {
       return "golden-apple"; // Level 0 pakai golden apple
     }
+  }
+  
+  // Fungsi untuk mendapatkan seed terbaik yang tersedia di inventory
+  getBestAvailableSeed() {
+    const prestigeLevel = this.userInfo?.prestigeLevel || 0;
+  
+    // Urutan prioritas berdasarkan prestige level
+    const seedPriorities = [];
+  
+    if (prestigeLevel >= 7) {
+      seedPriorities.push("apex-apple", "legacy-apple", "golden-apple", "wheat");
+    } else if (prestigeLevel >= 1) {
+      seedPriorities.push("legacy-apple", "golden-apple", "wheat");
+    } else {
+      seedPriorities.push("golden-apple", "wheat");
+    }
+  
+    // Return seed pertama yang tersedia di inventory
+    for (const seed of seedPriorities) {
+      if (this.getItemCount(seed) > 0) {
+        return seed;
+      }
+    }
+  
+    return null; // Tidak ada seed tersedia
   }
 
   // Prestige Methods
@@ -820,6 +864,10 @@ class GameStateManager {
       currentSeedCount = apexAppleCount;
     }
     
+    if (currentSeedCount >= emptyPlots) {
+    needSeeds = 0;
+    }
+    
     const needBoosters = Math.max(0, totalPlots - boosterCount);
     const currentCoins = this.gameState?.coins || 0;
     const currentAP = this.gameState?.ap || 0;
@@ -985,12 +1033,19 @@ class GameStateManager {
     } else {
       console.log(`Farmhouse: ${claimStatus.reason}`);
     }
-
+    
     const analysis = this.analyzeStrategicNeeds();
     console.log(`Plot: ${analysis.totalPlots} total, ${analysis.emptyPlots} kosong`);
     console.log(`Strategi: ${analysis.seedStrategy} (NextPlot: ${analysis.nextPlotPrice?.currency || 'none'})`);
     console.log(`Seeds: ${analysis.inventory.wheat}W, ${analysis.inventory["golden-apple"]}G, ${analysis.inventory["royal-apple"]}R, ${analysis.inventory["legacy-apple"]}L, ${analysis.inventory["apex-apple"]}A`);
     console.log(`Boosters: ${analysis.inventory["quantum-fertilizer"]}`);
+    
+    if (bestAvailable) {
+      const availableCount = this.getItemCount(bestAvailable);
+      console.log(`Best Available: ${availableCount} ${bestAvailable} (will plant this first)`);
+    } else {
+      console.log(`Best Available: None (need to buy seeds)`);
+    }
     
     if (analysis.needs.seeds > 0 || analysis.needs.boosters > 0) {
       console.log(`PERLU: ${analysis.needs.seeds} ${analysis.seedStrategy}, ${analysis.needs.boosters} boosters`);
@@ -1572,40 +1627,40 @@ GameStateManager.prototype.autoStrategicBuy = async function() {
 
 // Auto Plant Seeds
 GameStateManager.prototype.autoPlantSeeds = async function() {
-  const analysis = this.analyzeStrategicNeeds();
   const emptyPlots = this.getEmptyPlots();
-  const seedStrategy = analysis.seedStrategy;
-  const availableSeeds = this.getItemCount(seedStrategy);
-
+  
   if (emptyPlots.length === 0) {
     return { planted: 0, total: 0, success: true };
   }
 
-  if (availableSeeds === 0) {
-    return { planted: 0, total: emptyPlots.length, success: false };
+  // PRIORITAS: Gunakan seed yang tersedia di inventory
+  const availableSeed = this.getBestAvailableSeed();
+  
+  if (!availableSeed) {
+    return { planted: 0, total: emptyPlots.length, success: false, reason: "No seeds in inventory" };
   }
 
-  const maxPlantable = Math.min(emptyPlots.length, availableSeeds);
+  const availableCount = this.getItemCount(availableSeed);
+  const maxPlantable = Math.min(emptyPlots.length, availableCount);
 
   const results = {
     planted: 0,
     failed: 0,
     total: maxPlantable,
-    seedType: seedStrategy,
+    seedType: availableSeed,
     success: false
   };
 
   for (let i = 0; i < maxPlantable; i++) {
     const plot = emptyPlots[i];
     
-    const success = await this.plantSeed(plot.slotIndex, seedStrategy);
+    const success = await this.plantSeed(plot.slotIndex, availableSeed);
     if (success) {
       results.planted++;
     } else {
       results.failed++;
     }
 
-    // Delay antar penanaman untuk menghindari rate limiting
     if (i < maxPlantable - 1) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }

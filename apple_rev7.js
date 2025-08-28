@@ -2420,7 +2420,7 @@ if (require.main === module) {
   console.log("  • Better error handling dan status tracking");
   console.log("");
   
-  console.log("Starting PLANTS-FIRST bot in 5 seconds...");
+  console.log("Starting PLANTS-FIRST bot in 3 seconds...");
   console.log("=".repeat(80));
   
   setTimeout(() => {

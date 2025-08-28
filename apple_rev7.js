@@ -16,7 +16,7 @@ const HEADER_KEYS = {
 
 const CONFIG = {
   MINIMUM_RESERVES: {
-    AP: 10,
+    AP: 50,
     COINS: 5
   },
   HMAC: {
@@ -871,16 +871,16 @@ class GameStateManager {
     if (currentSeedCount >= emptyPlots) {
       needSeeds = 0;
     }
-  
+
     const needBoosters = Math.max(0, totalPlots - boosterCount);
     const currentCoins = this.gameState?.coins || 0;
     const currentAP = this.gameState?.ap || 0;
 
-    // CALCULATE AVAILABLE BUDGET WITH MINIMUM RESERVES
-    const availableCoins = Math.max(0, currentCoins - CONFIG.MINIMUM_RESERVES.COINS);
-    const availableAP = Math.max(0, currentAP - CONFIG.MINIMUM_RESERVES.AP);
+    // SEEDS & BOOSTERS: Gunakan full budget (TIDAK ada minimum reserve)
+    const availableCoinsForItems = currentCoins;  // Full budget untuk seeds
+    const availableAPForItems = currentAP;        // Full budget untuk seeds/boosters
 
-    // PLANTS FIRST: Calculate seed affordability first (with reserves)
+    // PLANTS FIRST: Calculate seed affordability dengan full budget
     let affordableSeeds = 0;
     let seedCost = 0;
     let seedCurrency = "";
@@ -891,31 +891,31 @@ class GameStateManager {
       seedCurrency = seedConfig.currency;
     
       if (seedCurrency === "coins") {
-        affordableSeeds = Math.floor(availableCoins / seedCost);
+        affordableSeeds = Math.floor(availableCoinsForItems / seedCost);
       } else if (seedCurrency === "ap") {
-        affordableSeeds = Math.floor(availableAP / seedCost);
+        affordableSeeds = Math.floor(availableAPForItems / seedCost);
       }
     }
 
-    // PLANTS FIRST: Calculate remaining budget after buying all needed seeds
-    let remainingAPAfterSeeds = availableAP;
-    let remainingCoinsAfterSeeds = availableCoins;
+    // PLANTS FIRST: Calculate remaining budget after seeds
+    let remainingAPAfterSeeds = availableAPForItems;
+    let remainingCoinsAfterSeeds = availableCoinsForItems;
   
     if (seedCurrency === "ap") {
       const seedsToBuy = Math.min(needSeeds, affordableSeeds);
-      remainingAPAfterSeeds = availableAP - (seedsToBuy * seedCost);
+      remainingAPAfterSeeds = availableAPForItems - (seedsToBuy * seedCost);
     } else if (seedCurrency === "coins") {
       const seedsToBuy = Math.min(needSeeds, affordableSeeds);
-      remainingCoinsAfterSeeds = availableCoins - (seedsToBuy * seedCost);
+      remainingCoinsAfterSeeds = availableCoinsForItems - (seedsToBuy * seedCost);
     }
 
-    // BOOSTERS SECOND: Only buy boosters with remaining budget
+    // BOOSTERS: Gunakan remaining budget (TIDAK ada minimum reserve)
     let affordableBoosters = 0;
     if (CONFIG.PLANT_STRATEGY.AUTO_BUY_BOOSTERS && remainingAPAfterSeeds >= CONFIG.ITEMS["quantum-fertilizer"].cost) {
       affordableBoosters = Math.floor(remainingAPAfterSeeds / CONFIG.ITEMS["quantum-fertilizer"].cost);
     }
 
-    // Plot affordability - consider after plants and boosters WITH MINIMUM RESERVES
+    // PLOT ONLY: Apply minimum reserves HANYA untuk plot
     let canAffordPlot = false;
     let plotCost = 0;
     let plotCurrency = "";
@@ -925,15 +925,17 @@ class GameStateManager {
       plotCurrency = (nextPlotPrice.currency || "").toLowerCase();
     
       if (plotCurrency === "coins") {
-        // Check if we have enough coins INCLUDING the minimum reserve
-        canAffordPlot = currentCoins >= (plotCost + CONFIG.MINIMUM_RESERVES.COINS);
+        // Plot: Cek dengan minimum reserve coins
+        const requiredCoinsForPlot = plotCost + CONFIG.MINIMUM_RESERVES.COINS;
+        canAffordPlot = currentCoins >= requiredCoinsForPlot;
       } else if (plotCurrency === "ap") {
-        let remainingAPAfterAllPurchases = remainingAPAfterSeeds;
+        // Plot: Cek dengan minimum reserve AP setelah seeds & boosters
+        let remainingAPAfterAllItems = remainingAPAfterSeeds;
         const boostersToBuy = Math.min(needBoosters, affordableBoosters);
-        remainingAPAfterAllPurchases -= (boostersToBuy * CONFIG.ITEMS["quantum-fertilizer"].cost);
+        remainingAPAfterAllItems -= (boostersToBuy * CONFIG.ITEMS["quantum-fertilizer"].cost);
       
-        // Check if we have enough AP INCLUDING the minimum reserve
-        canAffordPlot = (remainingAPAfterAllPurchases + CONFIG.MINIMUM_RESERVES.AP) >= (plotCost + CONFIG.MINIMUM_RESERVES.AP);
+        const requiredAPForPlot = plotCost + CONFIG.MINIMUM_RESERVES.AP;
+        canAffordPlot = (remainingAPAfterAllItems + CONFIG.MINIMUM_RESERVES.AP) >= requiredAPForPlot;
       }
     }
 
@@ -942,20 +944,22 @@ class GameStateManager {
         type: seedStrategy,
         quantity: Math.min(needSeeds, affordableSeeds),
         cost: seedCost,
-        currency: seedCurrency
+        currency: seedCurrency,
+        noReserveApplied: true  // Seeds menggunakan full budget
       },
       boosters: {
         quantity: Math.min(needBoosters, affordableBoosters),
         cost: CONFIG.ITEMS["quantum-fertilizer"].cost,
         currency: "ap",
-        plantsFirstEnabled: CONFIG.PLANT_STRATEGY.PLANTS_FIRST_PRIORITY
+        plantsFirstEnabled: CONFIG.PLANT_STRATEGY.PLANTS_FIRST_PRIORITY,
+        noReserveApplied: true  // Boosters menggunakan remaining budget
       },
       plot: {
         canAfford: canAffordPlot,
         cost: plotCost,
         currency: plotCurrency,
         shouldBuy: canAffordPlot && nextPlotPrice,
-        minimumReserveApplied: true
+        minimumReserveApplied: true  // HANYA plot yang pakai minimum reserve
       }
     };
 
@@ -975,10 +979,12 @@ class GameStateManager {
       budget: {
         coins: currentCoins,
         ap: currentAP,
-        availableCoins: availableCoins,  // After minimum reserve
-        availableAP: availableAP,        // After minimum reserve
-        apAfterSeeds: remainingAPAfterSeeds,
-        minimumReserves: CONFIG.MINIMUM_RESERVES
+        // Untuk seeds/boosters: full budget
+        availableCoinsForItems: availableCoinsForItems,
+        availableAPForItems: availableAPForItems,
+        // Untuk plot: dengan reserve
+        minimumReserves: CONFIG.MINIMUM_RESERVES,
+        apAfterSeeds: remainingAPAfterSeeds
       },
       needs: {
         seeds: needSeeds,
@@ -994,7 +1000,7 @@ class GameStateManager {
       readyToPlant: true,
       canAffordAllNeeds: buyPlan.seeds.quantity >= needSeeds && buyPlan.boosters.quantity >= needBoosters
     };
-  }
+  };
 
   canAffordItem(itemKey, quantity = 1) {
     const priceInfo = CONFIG.ITEMS[itemKey];
@@ -1280,19 +1286,15 @@ GameStateManager.prototype.buyPlot = async function() {
 
   // CHECK MINIMUM RESERVES BEFORE BUYING PLOT
   if (currency === "coins") {
-    const availableCoins = currentCoins;
     const requiredTotal = cost + CONFIG.MINIMUM_RESERVES.COINS;
-    
-    if (availableCoins < requiredTotal) {
-      console.log(`Skip buy plot: Need ${requiredTotal} coins (${cost} + ${CONFIG.MINIMUM_RESERVES.COINS} reserve), have ${availableCoins}`);
+    if (currentCoins < requiredTotal) {
+      console.log(`Skip buy plot: Need ${requiredTotal} coins (${cost} + ${CONFIG.MINIMUM_RESERVES.COINS} reserve), have ${currentCoins}`);
       return false;
     }
   } else if (currency === "ap") {
-    const availableAP = currentAP;
     const requiredTotal = cost + CONFIG.MINIMUM_RESERVES.AP;
-    
-    if (availableAP < requiredTotal) {
-      console.log(`Skip buy plot: Need ${requiredTotal} AP (${cost} + ${CONFIG.MINIMUM_RESERVES.AP} reserve), have ${availableAP}`);
+    if (currentAP < requiredTotal) {
+      console.log(`Skip buy plot: Need ${requiredTotal} AP (${cost} + ${CONFIG.MINIMUM_RESERVES.AP} reserve), have ${currentAP}`);
       return false;
     }
   }
@@ -2420,7 +2422,7 @@ if (require.main === module) {
   console.log("  • Better error handling dan status tracking");
   console.log("");
   
-  console.log("Starting PLANTS-FIRST bot in 3 seconds...");
+  console.log("Starting PLANTS-FIRST bot in 5 seconds...");
   console.log("=".repeat(80));
   
   setTimeout(() => {

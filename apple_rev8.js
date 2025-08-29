@@ -16,7 +16,7 @@ const HEADER_KEYS = {
 
 const CONFIG = {
   MINIMUM_RESERVES: {
-    AP: 50,
+    AP: 100,
     COINS: 5
   },
   HMAC: {

@@ -528,13 +528,17 @@ class GameStateManager {
 
   getPlotsNeedingBooster() {
     if (!this.gameState?.plots) return [];
-  
+
     return this.gameState.plots
-      .filter(plot => !plot.modifier || this.isModifierExpired(plot.modifier))
+      .filter(plot => {
+        return !plot.modifier || this.isModifierExpired(plot.modifier);
+      })
       .map(plot => ({
         slotIndex: plot.slotIndex,
         id: plot.id,
-        hasSeed: !!plot.seed
+        hasSeed: !!plot.seed,
+        currentModifier: plot.modifier?.key || null,
+        modifierExpired: plot.modifier ? this.isModifierExpired(plot.modifier) : true
       }))
       .sort((a, b) => a.slotIndex - b.slotIndex);
   }
@@ -852,18 +856,19 @@ class GameStateManager {
     const nextPlotPrice = this.gameState?.nextPlotPrice;
     const seedStrategy = this.determinePlantingStrategy();
     const boosterStrategy = this.determineBoosterStrategy();
-    const boosterCount = this.getItemCount(boosterStrategy);
-    const needBoosters = Math.max(0, totalPlots - boosterCount);
+    const plotsNeedingBooster = this.getPlotsNeedingBooster();
+    const needBoosters = plotsNeedingBooster.length;
+    const currentBoosterCount = this.getItemCount(boosterStrategy);
   
     const wheatCount = this.getItemCount("wheat");
     const goldenAppleCount = this.getItemCount("golden-apple");
     const royalAppleCount = this.getItemCount("royal-apple");
     const legacyAppleCount = this.getItemCount("legacy-apple");
     const apexAppleCount = this.getItemCount("apex-apple");
-  
+
     let needSeeds = 0;
     let currentSeedCount = 0;
-  
+
     if (seedStrategy === "wheat") {
       needSeeds = Math.max(0, emptyPlots - wheatCount);
       currentSeedCount = wheatCount;
@@ -880,7 +885,7 @@ class GameStateManager {
       needSeeds = Math.max(0, emptyPlots - apexAppleCount);
       currentSeedCount = apexAppleCount;
     }
-  
+
     if (currentSeedCount >= emptyPlots) {
       needSeeds = 0;
     }
@@ -888,11 +893,11 @@ class GameStateManager {
     const currentCoins = this.gameState?.coins || 0;
     const currentAP = this.gameState?.ap || 0;
 
-    // SEEDS & BOOSTERS: Gunakan full budget (TIDAK ada minimum reserve)
-    const availableCoinsForItems = currentCoins;  // Full budget untuk seeds
-    const availableAPForItems = currentAP;        // Full budget untuk seeds/boosters
+    // Budget untuk items (tanpa reserve)
+    const availableCoinsForItems = currentCoins;
+    const availableAPForItems = currentAP;
 
-    // PLANTS FIRST: Calculate seed affordability dengan full budget
+    // Hitung affordability untuk seeds
     let affordableSeeds = 0;
     let seedCost = 0;
     let seedCurrency = "";
@@ -901,7 +906,7 @@ class GameStateManager {
     if (seedConfig) {
       seedCost = seedConfig.cost;
       seedCurrency = seedConfig.currency;
-    
+  
       if (seedCurrency === "coins") {
         affordableSeeds = Math.floor(availableCoinsForItems / seedCost);
       } else if (seedCurrency === "ap") {
@@ -909,10 +914,10 @@ class GameStateManager {
       }
     }
 
-    // PLANTS FIRST: Calculate remaining budget after seeds
+    // Hitung sisa budget setelah beli seeds
     let remainingAPAfterSeeds = availableAPForItems;
     let remainingCoinsAfterSeeds = availableCoinsForItems;
-  
+
     if (seedCurrency === "ap") {
       const seedsToBuy = Math.min(needSeeds, affordableSeeds);
       remainingAPAfterSeeds = availableAPForItems - (seedsToBuy * seedCost);
@@ -921,33 +926,31 @@ class GameStateManager {
       remainingCoinsAfterSeeds = availableCoinsForItems - (seedsToBuy * seedCost);
     }
 
-    // BOOSTERS: Gunakan remaining budget 
+    // PERBAIKAN: Hitung affordability booster berdasarkan kebutuhan AKTUAL
     let affordableBoosters = 0;
     const boosterCost = CONFIG.ITEMS[boosterStrategy].cost;
-  
+
     if (CONFIG.PLANT_STRATEGY.AUTO_BUY_BOOSTERS && remainingAPAfterSeeds >= boosterCost) {
       affordableBoosters = Math.floor(remainingAPAfterSeeds / boosterCost);
     }
 
-    // PLOT ONLY: Apply minimum reserves HANYA untuk plot
+    // Plot affordability check dengan reserve
     let canAffordPlot = false;
     let plotCost = 0;
     let plotCurrency = "";
-  
+
     if (nextPlotPrice) {
       plotCost = nextPlotPrice.amount || 0;
       plotCurrency = (nextPlotPrice.currency || "").toLowerCase();
-    
+  
       if (plotCurrency === "coins") {
-        // Plot: Cek dengan minimum reserve coins
         const requiredCoinsForPlot = plotCost + CONFIG.MINIMUM_RESERVES.COINS;
         canAffordPlot = currentCoins >= requiredCoinsForPlot;
       } else if (plotCurrency === "ap") {
-        // Plot: Cek dengan minimum reserve AP setelah seeds & boosters
         let remainingAPAfterAllItems = remainingAPAfterSeeds;
         const boostersToBuy = Math.min(needBoosters, affordableBoosters);
-        remainingAPAfterAllItems -= (boostersToBuy * CONFIG.ITEMS["quantum-fertilizer"].cost);
-      
+        remainingAPAfterAllItems -= (boostersToBuy * CONFIG.ITEMS[boosterStrategy].cost);
+    
         const requiredAPForPlot = plotCost + CONFIG.MINIMUM_RESERVES.AP;
         canAffordPlot = (remainingAPAfterAllItems + CONFIG.MINIMUM_RESERVES.AP) >= requiredAPForPlot;
       }
@@ -990,16 +993,14 @@ class GameStateManager {
         "royal-apple": royalAppleCount,
         "legacy-apple": legacyAppleCount,
         "apex-apple": apexAppleCount,
-        "quantum-fertilizer": boosterCount,
+        "quantum-fertilizer": currentBoosterCount,
         "apex-potion": this.getItemCount("apex-potion")
       },
       budget: {
         coins: currentCoins,
         ap: currentAP,
-        // Untuk seeds/boosters: full budget
         availableCoinsForItems: availableCoinsForItems,
         availableAPForItems: availableAPForItems,
-        // Untuk plot: dengan reserve
         minimumReserves: CONFIG.MINIMUM_RESERVES,
         apAfterSeeds: remainingAPAfterSeeds
       },
@@ -1013,7 +1014,7 @@ class GameStateManager {
       },
       buyPlan,
       hasEnoughSeeds: currentSeedCount >= emptyPlots,
-      hasEnoughBoosters: boosterCount >= totalPlots,
+      hasEnoughBoosters: currentBoosterCount >= needBoosters,
       readyToPlant: true,
       canAffordAllNeeds: buyPlan.seeds.quantity >= needSeeds && buyPlan.boosters.quantity >= needBoosters
     };
@@ -2445,7 +2446,7 @@ if (require.main === module) {
   console.log("  • Better error handling dan status tracking");
   console.log("");
   
-  console.log("Starting PLANTS-FIRST bot in 5 seconds...");
+  console.log("Starting PLANTS-FIRST bot in 3 seconds...");
   console.log("=".repeat(80));
   
   setTimeout(() => {
